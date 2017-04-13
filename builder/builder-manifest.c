@@ -1218,13 +1218,14 @@ builder_manifest_init_app_dir (BuilderManifest *self,
         g_ptr_array_add (args, g_strdup ("--type=runtime"));
       else
         g_ptr_array_add (args, g_strdup ("--writable-sdk"));
-
-      for (i = 0; self->sdk_extensions != NULL && self->sdk_extensions[i] != NULL; i++)
-        {
-          const char *ext = self->sdk_extensions[i];
-          g_ptr_array_add (args, g_strdup_printf ("--sdk-extension=%s", ext));
-        }
     }
+
+  for (i = 0; self->sdk_extensions != NULL && self->sdk_extensions[i] != NULL; i++)
+    {
+      const char *ext = self->sdk_extensions[i];
+      g_ptr_array_add (args, g_strdup_printf ("--sdk-extension=%s", ext));
+    }
+
   if (self->build_extension)
     {
       g_ptr_array_add (args, g_strdup ("--type=extension"));
@@ -1758,7 +1759,10 @@ appstream_compose (GFile   *app_dir,
   va_end (ap);
 
   if (!builder_maybe_host_spawnv (NULL, NULL, &local_error, (const char * const *)args->pdata))
-    g_print ("WARNING: appstream-compose failed: %s\n", local_error->message);
+    {
+      g_print ("ERROR: appstream-compose failed: %s\n", local_error->message);
+      return FALSE;
+    }
 
   return TRUE;
 }
@@ -1940,20 +1944,44 @@ builder_manifest_cleanup (BuilderManifest *self,
                                           error))
             return FALSE;
 
+          desktop_keys = g_key_file_get_keys (keyfile,
+                                              G_KEY_FILE_DESKTOP_GROUP,
+                                              NULL, NULL);
+
           if (self->rename_icon)
             {
+              g_autofree char *original_icon_name = g_key_file_get_string (keyfile,
+                                                                           G_KEY_FILE_DESKTOP_GROUP,
+                                                                           G_KEY_FILE_DESKTOP_KEY_ICON,
+                                                                           NULL);
+
               g_key_file_set_string (keyfile,
                                      G_KEY_FILE_DESKTOP_GROUP,
                                      G_KEY_FILE_DESKTOP_KEY_ICON,
                                      self->id);
+
+              /* Also rename localized version of the Icon= field */
+              for (i = 0; desktop_keys[i]; i++)
+                {
+                  /* Only rename untranslated icon names */
+                  if (g_str_has_prefix (desktop_keys[i], "Icon["))
+                    {
+                      g_autofree char *icon_name = g_key_file_get_string (keyfile,
+                                                                          G_KEY_FILE_DESKTOP_GROUP,
+                                                                          desktop_keys[i], NULL);
+
+                      if (strcmp (icon_name, original_icon_name) == 0)
+                        g_key_file_set_string (keyfile,
+                                               G_KEY_FILE_DESKTOP_GROUP,
+                                               desktop_keys[i],
+                                               self->id);
+                    }
+                }
             }
 
           if (self->desktop_file_name_suffix ||
               self->desktop_file_name_prefix)
             {
-              desktop_keys = g_key_file_get_keys (keyfile,
-                                                  G_KEY_FILE_DESKTOP_GROUP,
-                                                  NULL, NULL);
               for (i = 0; desktop_keys[i]; i++)
                 {
                   if (strcmp (desktop_keys[i], "Name") == 0 ||
@@ -2617,8 +2645,9 @@ builder_manifest_run (BuilderManifest *self,
   /* Just add something so that we get the default rules (own our own id) */
   g_ptr_array_add (args, g_strdup ("--talk-name=org.freedesktop.DBus"));
 
-  /* Inherit all finish args except the filesystem and command
-   * ones so the command gets the same access as the final app
+  /* Inherit all finish args except --filesystem and some that
+   * build doesn't understand so the command gets the same access
+   * as the final app
    */
   if (self->finish_args)
     {
@@ -2629,7 +2658,8 @@ builder_manifest_run (BuilderManifest *self,
               !g_str_has_prefix (arg, "--extension") &&
               !g_str_has_prefix (arg, "--sdk") &&
               !g_str_has_prefix (arg, "--runtime") &&
-              !g_str_has_prefix (arg, "--command"))
+              !g_str_has_prefix (arg, "--command") &&
+              !g_str_has_prefix (arg, "--require-version"))
             g_ptr_array_add (args, g_strdup (arg));
         }
     }

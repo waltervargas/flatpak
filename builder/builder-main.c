@@ -346,7 +346,7 @@ main (int    argc,
       g_autoptr(GFile) build_subdir = NULL;
 
       if (!builder_git_mirror_repo (opt_from_git,
-                                    !opt_disable_updates, FALSE,
+                                    !opt_disable_updates, FALSE, FALSE,
                                     git_branch, build_context, &error))
         {
           g_printerr ("Can't clone manifest repo: %s\n", error->message);
@@ -482,7 +482,7 @@ main (int    argc,
           else
             {
               g_printerr ("App dir '%s' is not empty. Please delete "
-                          "the existing contents.\n", app_dir_path);
+                          "the existing contents or use --force-clean.\n", app_dir_path);
               return 1;
             }
         }
